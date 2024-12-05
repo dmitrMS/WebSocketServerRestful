@@ -1,24 +1,60 @@
+using Microsoft.EntityFrameworkCore;
+using ServerRestful;
+using System;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Threading.Tasks;
 
-public class WebSocketClientManager
+namespace WebSocketRestApi
 {
-    private readonly ConcurrentDictionary<string, WebSocket> _clients = new();
-
-    public IEnumerable<string> GetAllClientIds() => _clients.Keys;
-
-    public bool TryGetClient(string clientId, out WebSocket? webSocket)
+    public class ClientManager
     {
-        return _clients.TryGetValue(clientId, out webSocket);
-    }
+        private readonly WebSocketDbContext _dbContext;
+        private static readonly ConcurrentDictionary<string, WebSocket> Clients = new();
 
-    public void RegisterClient(string clientId, WebSocket webSocket)
-    {
-        _clients[clientId] = webSocket;
-    }
+        public ClientManager(WebSocketDbContext dbContext)
+        {
+            _dbContext = dbContext;
+        }
 
-    public void RemoveClient(string clientId)
-    {
-        _clients.TryRemove(clientId, out _);
+        public async Task AddClientAsync(string clientId, WebSocket webSocket)
+        {
+            Clients[clientId] = webSocket;
+
+            var client = new WebSocketClient
+            {
+                ClientId = Convert.ToInt64(clientId), // Преобразуем строку в long
+                ConnectionState = "Connected",
+                //ConnectedAt = DateOnly.FromDateTime(DateTime.Now).ToDateTime(TimeOnly.MinValue) // Преобразуем DateOnly в DateTime
+                ConnectedAt = DateOnly.FromDateTime(DateTime.Now)
+        };
+
+            _dbContext.WebSocketClients.Add(client);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        public async Task RemoveClientAsync(string clientId)
+        {
+            Clients.TryRemove(clientId, out _);
+
+            var clientIdLong = Convert.ToInt64(clientId); // Преобразуем строку в long
+
+            var client = await _dbContext.WebSocketClients
+                .FirstOrDefaultAsync(c => c.ClientId == clientIdLong); // Сравниваем как long
+            if (client != null)
+            {
+                // Преобразуем DateTime в DateOnly для поля DisconnectedAt
+                client.DisconnectedAt = DateOnly.FromDateTime(DateTime.Now);
+
+                client.ConnectionState = "Disconnected";
+                await _dbContext.SaveChangesAsync();
+            }
+        }
+
+
+        public ConcurrentDictionary<string, WebSocket> GetClients()
+        {
+            return Clients;
+        }
     }
 }
